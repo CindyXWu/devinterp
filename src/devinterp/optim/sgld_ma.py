@@ -4,9 +4,9 @@ import numpy as np
 import torch
 
 
-class SGLD(torch.optim.Optimizer):
+class SGLD_MA(torch.optim.Optimizer):
     """
-    Implements Stochastic Gradient Langevin Dynamics (SGLD) optimizer.
+    Implements Stochastic Gradient Langevin Dynamics (SGLD) optimizer with mini-batch Metropolis accept/reject.
     
     This optimizer blends Stochastic Gradient Descent (SGD) with Langevin Dynamics,
     introducing Gaussian noise to the gradient updates. It can also include an
@@ -73,7 +73,7 @@ class SGLD(torch.optim.Optimizer):
             bounding_box_size=bounding_box_size,
             num_samples=num_samples,
         )
-        super(SGLD, self).__init__(params, defaults)
+        super(SGLD_MA, self).__init__(params, defaults)
 
         # Save the initial parameters if the elasticity term is set
         for group in self.param_groups:
@@ -85,21 +85,35 @@ class SGLD(torch.optim.Optimizer):
                 group["temperature"] = np.log(group["num_samples"])
 
     def step(self, closure: Callable = None):
+        """
+        Perform a single optimization step.
+        
+        :param closure: A closure that reevaluates the model and returns the loss.
+        """
+        if closure is None:
+            raise RuntimeError("SGLD with Metropolis requires closure, None provided")
+        
         for group in self.param_groups:
             for p in group["params"]:
                 if p.grad is None:
                     continue
-
+                
                 param_state = self.state[p]
+
+                # Store the current state
+                param_state["current_param"] = p.clone()
+                
+                # Calculate the update (dw)
                 dw = p.grad.data * group["num_samples"] / group["temperature"]
 
                 if group["weight_decay"] != 0:
                     dw.add_(p.data, alpha=group["weight_decay"])
 
                 if group["elasticity"] != 0:
-                    initial_param = self.state[p]["initial_param"]
+                    initial_param = param_state["initial_param"]
                     dw.add_((p.data - initial_param), alpha=group["elasticity"])
 
+                # Proposed update
                 p.data.add_(dw, alpha=-0.5 * group["lr"])
 
                 # Add Gaussian noise
@@ -107,10 +121,26 @@ class SGLD(torch.optim.Optimizer):
                     mean=0.0, std=group["noise_level"], size=dw.size(), device=dw.device
                 )
                 p.data.add_(noise, alpha=group["lr"] ** 0.5)
+                
                 # Rebound if exceeded bounding box size
                 if group["bounding_box_size"]:
                     torch.clamp_(
                         p.data,
-                        min=param_state["initial_param"] - group["bounding_box_size"],
-                        max=param_state["initial_param"] + group["bounding_box_size"],
+                        min=initial_param - group["bounding_box_size"],
+                        max=initial_param + group["bounding_box_size"],
                     )
+                
+                # Calculate acceptance probability
+                current_loss = closure()
+                # Now model's parameters are updated to proposed state due to form of closure function (defined in sampler function)
+                with torch.no_grad():
+                    # Calculate loss at proposed state and do not store gradients
+                    proposed_loss = closure(backward=False)
+
+                # Metropolis-Hastings acceptance ratio
+                accept_ratio = torch.exp(current_loss - proposed_loss)
+
+                # Decide whether to accept the update
+                if torch.rand(1).item() > accept_ratio:
+                    # Reject the update, revert to current state
+                    p.data.copy_(param_state["current_param"])
