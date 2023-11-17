@@ -11,7 +11,8 @@ from torch.multiprocessing import cpu_count, get_context
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from devinterp.optim.sgld import SGLD
+from devinterp.optim.sgld import SGLD, SGLD_MA
+from devinterp.optim.sgnht import SGNHT
 
 
 def sample_single_chain(
@@ -56,13 +57,26 @@ def sample_single_chain(
     model.train()
 
     for i, (xs, ys) in iterator:
+        
+        def closure():
+            """Used for sampling with Metropolis step only."""
+            optimizer.zero_grad()
+            outputs = model(xs)
+            loss = criterion(outputs, ys)
+            loss.backward()
+            return loss
+
         optimizer.zero_grad()
         xs, ys = xs.to(device), ys.to(device)
         y_preds = model(xs)
         loss = criterion(y_preds, ys)
 
         loss.backward()
-        optimizer.step()
+
+        if sampling_method in [SGLD, SGNHT]:
+            optimizer.step(closure=None)
+        elif sampling_method in [SGLD_MA]:
+            optimizer.step(closure=closure)
 
         if i >= num_burnin_steps and (i - num_burnin_steps) % num_steps_bw_draws == 0:
             draw_idx = (i - num_burnin_steps) // num_steps_bw_draws
