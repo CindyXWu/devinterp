@@ -83,6 +83,9 @@ class SGLD_MA(torch.optim.Optimizer):
                     param_state["initial_param"] = p.data.clone().detach()
             if group["temperature"] == "adaptive":  # TODO: Better name
                 group["temperature"] = np.log(group["num_samples"])
+        
+        self.accepted_updates = 0
+        self.total_updates = 0
 
     def step(self, closure: Callable = None):
         """
@@ -102,7 +105,9 @@ class SGLD_MA(torch.optim.Optimizer):
 
                 # Store the current state
                 param_state["current_param"] = p.clone()
-                
+                param_state["current_grad"] = p.grad.data.clone()
+                current_loss = closure(backward=False)
+
                 # Calculate the update (dw)
                 dw = p.grad.data * group["num_samples"] / group["temperature"]
 
@@ -131,16 +136,28 @@ class SGLD_MA(torch.optim.Optimizer):
                     )
                 
                 # Calculate acceptance probability
-                current_loss = closure()
-                # Now model's parameters are updated to proposed state due to form of closure function (defined in sampler function)
-                with torch.no_grad():
-                    # Calculate loss at proposed state and do not store gradients
-                    proposed_loss = closure(backward=False)
+                log_q_current_to_proposed = -torch.sum((p.data - param_state["current_param"] - group['lr'] * param_state["current_grad"])**2) / (4 * group['lr'])
+                # Now model's parameters are updated to proposed state, re-evaluate loss
+                # Set backward to be true to update gradients
+                proposed_loss = closure(backward=True)
+                proposed_grad = p.grad.data.clone()
+                log_q_proposed_to_current = -torch.sum((param_state["current_param"] - p.data - group['lr'] * proposed_grad)**2) / (4 * group['lr'])
 
                 # Metropolis-Hastings acceptance ratio
-                accept_ratio = torch.exp(current_loss - proposed_loss)
+                accept_ratio = torch.exp(log_q_proposed_to_current - log_q_current_to_proposed + current_loss - proposed_loss)
 
                 # Decide whether to accept the update
                 if torch.rand(1).item() > accept_ratio:
                     # Reject the update, revert to current state
                     p.data.copy_(param_state["current_param"])
+                    p.grad.data.copy_(param_state["current_grad"])
+                else:
+                    self.accepted_updates += 1
+                
+                self.total_updates += 1
+        
+    def get_acceptance_ratio(self):
+        """Return ratio of accepted to total updates."""
+        if self.total_updates == 0:
+            return 0
+        return self.accepted_updates / self.total_updates

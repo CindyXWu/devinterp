@@ -25,7 +25,8 @@ def estimate_learning_coeff(
     device: torch.device = torch.device("cpu"),
     verbose: bool = True,
 ) -> float:
-    trace = sample(
+    """Use lambda hat equation and average and baseline loss."""
+    trace: pd.DataFrame = sample(
         model=model,
         loader=loader,
         criterion=criterion,
@@ -44,6 +45,10 @@ def estimate_learning_coeff(
     baseline_loss = trace.loc[trace["chain"] == 0, "loss"].iloc[0]
     avg_loss = trace.groupby("chain")["loss"].mean().mean()
     num_samples = len(loader.dataset)
+
+    if 'accept_ratio' in trace.columns:
+        accept_ratio = trace.groupby("chain")["accept_ratio"].mean().mean()
+        print(f"Acceptance ratio: {accept_ratio}")
 
     return (avg_loss - baseline_loss) * num_samples / np.log(num_samples)
 

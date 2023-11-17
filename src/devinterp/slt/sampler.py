@@ -31,8 +31,13 @@ def sample_single_chain(
     verbose=True,
     device: torch.device = torch.device("cpu"),
     return_weights=False,
-):
-    # Initialize new model and optimizer for this chain
+) -> pd.DataFrame:
+    """Instantiate a new model and optimizer for this chain and run sampling to get RLCT estimate.
+    
+    Returns:
+        local_draws: A DataFrame containing loss values with loss over steps.
+        Save weights if returning weights is true. Also save acceptance ratio if using Metropolis step.
+    """
     model = deepcopy(ref_model).to(device)
 
     optimizer_kwargs = optimizer_kwargs or {}
@@ -45,7 +50,7 @@ def sample_single_chain(
 
     local_draws = pd.DataFrame(
         index=range(num_draws),
-        columns=["chain", "step", "loss"] + (["model_weights"] if return_weights else []),
+        columns=["chain", "step", "loss"] + (["model_weights"] if return_weights else []) + (["accept_ratio"] if sampling_method == SGLD_MA else [])
     )
 
     iterator = zip(range(num_steps), itertools.cycle(loader))
@@ -60,17 +65,18 @@ def sample_single_chain(
     for i, (xs, ys) in iterator:
         
         def closure(backward=True):
-            """Used for sampling with Metropolis step only.
+            """
+            Compute loss for the current state of the model and update the gradients.
             
             Args:
                 backward: Whether to perform backward pass. Only used for calculating current loss
                 because it allows us to step through parameters to get to the right place to then calculate
                 the proposed loss. See SGLD_MA.step() for more details.
             """
-            optimizer.zero_grad()
             outputs = model(xs)
             loss = criterion(outputs, ys)
             if backward:
+                optimizer.zero_grad() 
                 loss.backward()
             return loss
 
@@ -96,6 +102,9 @@ def sample_single_chain(
                     model.state_dict()["weights"].clone().detach()
                 )
 
+    if sampling_method == SGLD_MA:
+        local_draws["accept_ratio"] = optimizer.accepted_updates / optimizer.total_updates
+
     return local_draws
 
 
@@ -119,7 +128,7 @@ def sample(
     device: torch.device = torch.device("cpu"),
     verbose: bool = True,
     return_weights: bool = False,
-):
+) -> pd.DataFrame:
     """
     Sample model weights using a given optimizer, supporting multiple chains.
 
@@ -179,6 +188,11 @@ def sample(
             results.append(_sample_single_chain(get_args(i)))
 
     results_df = pd.concat(results, ignore_index=True)
+
+    if sampling_method == SGLD_MA:
+        for i, result in enumerate(results):
+            results_df.loc[results_df['chain'] == i, 'accept_ratio'] = result["accept_ratio"].iloc[0]
+
     return results_df
 
 
