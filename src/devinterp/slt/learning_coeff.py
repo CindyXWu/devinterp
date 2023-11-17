@@ -90,6 +90,8 @@ def estimate_learning_coeff_with_summary(
     num_samples = len(loader.dataset)
     avg_losses = trace.groupby("chain")["loss"].mean()
     results = torch.zeros(num_chains, device=device)
+    if 'accept_ratio' in trace.columns:
+        accept_ratio = trace.groupby("chain")["accept_ratio"].mean().mean()
 
     for i in range(num_chains):
         chain_avg_loss = avg_losses.iloc[i]
@@ -103,6 +105,7 @@ def estimate_learning_coeff_with_summary(
         "std": std_loss.item(),
         **{f"chain_{i}": results[i].item() for i in range(num_chains)},
         "trace": trace,
+        "accept_ratio": accept_ratio,
     }
 
 
