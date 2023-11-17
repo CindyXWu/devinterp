@@ -11,7 +11,8 @@ from torch.multiprocessing import cpu_count, get_context
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from devinterp.optim.sgld import SGLD, SGLD_MA
+from devinterp.optim.sgld import SGLD
+from devinterp.optim.sgld_ma import SGLD_MA
 from devinterp.optim.sgnht import SGNHT
 
 
@@ -58,12 +59,19 @@ def sample_single_chain(
 
     for i, (xs, ys) in iterator:
         
-        def closure():
-            """Used for sampling with Metropolis step only."""
+        def closure(backward=True):
+            """Used for sampling with Metropolis step only.
+            
+            Args:
+                backward: Whether to perform backward pass. Only used for calculating current loss
+                because it allows us to step through parameters to get to the right place to then calculate
+                the proposed loss. See SGLD_MA.step() for more details.
+            """
             optimizer.zero_grad()
             outputs = model(xs)
             loss = criterion(outputs, ys)
-            loss.backward()
+            if backward:
+                loss.backward()
             return loss
 
         optimizer.zero_grad()
