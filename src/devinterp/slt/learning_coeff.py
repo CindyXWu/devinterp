@@ -24,6 +24,7 @@ def estimate_learning_coeff(
     pbar: bool = True,
     device: torch.device = torch.device("cpu"),
     verbose: bool = True,
+    freeze_layers: Optional[List[int]] = None,
 ) -> float:
     """Use lambda hat equation and average and baseline loss."""
     trace: pd.DataFrame = sample(
@@ -41,6 +42,7 @@ def estimate_learning_coeff(
         pbar=pbar,
         device=device,
         verbose=verbose,
+        freeze_layers=freeze_layers,
     )
     baseline_loss = trace.loc[trace["chain"] == 0, "loss"].iloc[0]
     avg_loss = trace.groupby("chain")["loss"].mean().mean()
@@ -68,7 +70,14 @@ def estimate_learning_coeff_with_summary(
     pbar: bool = True,
     device: torch.device = torch.device("cpu"),
     verbose: bool = True,
+    freeze_layers: Optional[List[int]] = None,
 ) -> dict:
+    """Calls on sample function and returns summary mean, standard deviation, trace, and acceptance ratio for MH.
+    
+    Args:
+        freeze_layers: If a list of ints, freezes the layers at those indices. 
+            If a dict, freezes the layers named in value list for the key module name.
+    """
     trace = sample(
         model=model,
         loader=loader,
@@ -84,6 +93,7 @@ def estimate_learning_coeff_with_summary(
         pbar=pbar,
         device=device,
         verbose=verbose,
+        freeze_layers=freeze_layers,
     )
 
     baseline_loss = trace.loc[trace["chain"] == 0, "loss"].iloc[0]

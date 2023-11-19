@@ -31,6 +31,7 @@ def sample_single_chain(
     verbose=True,
     device: torch.device = torch.device("cpu"),
     return_weights=False,
+    freeze_layers: Optional[List[int]] = None,
 ) -> pd.DataFrame:
     """Instantiate a new model and optimizer for this chain and run sampling to get RLCT estimate.
     
@@ -40,8 +41,17 @@ def sample_single_chain(
     """
     model = deepcopy(ref_model).to(device)
 
-    optimizer_kwargs = optimizer_kwargs or {}
-    optimizer = sampling_method(model.parameters(), **optimizer_kwargs)
+    def should_freeze(layer_index):
+        return freeze_layers is not None and layer_index in freeze_layers
+    
+    if freeze_layers is None:
+        optimizer_params = model.parameters()
+    else: # Only pass parameters of layers that should not be frozen to the optimizer
+        optimizer_params = []
+        for i, layer in enumerate(model.layers):
+            if not should_freeze(i):
+                optimizer_params.extend(layer.parameters())
+    optimizer = sampling_method(optimizer_params, **(optimizer_kwargs or {}))
 
     if seed is not None:
         torch.manual_seed(seed)
@@ -69,9 +79,7 @@ def sample_single_chain(
             Compute loss for the current state of the model and update the gradients.
             
             Args:
-                backward: Whether to perform backward pass. Only used for calculating current loss
-                because it allows us to step through parameters to get to the right place to then calculate
-                the proposed loss. See SGLD_MA.step() for more details.
+                backward: Whether to perform backward pass. Only used for updating weight grad at proposed location. See SGLD_MA.step() for more details.
             """
             outputs = model(xs)
             loss = criterion(outputs, ys)
@@ -128,6 +136,7 @@ def sample(
     device: torch.device = torch.device("cpu"),
     verbose: bool = True,
     return_weights: bool = False,
+    freeze_layers: Optional[List[int]] = None,
 ) -> pd.DataFrame:
     """
     Sample model weights using a given optimizer, supporting multiple chains.
@@ -175,6 +184,7 @@ def sample(
             device=device,
             verbose=verbose,
             return_weights=return_weights,
+            freeze_layers=freeze_layers,
         )
 
     results = []
