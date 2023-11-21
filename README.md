@@ -3,6 +3,9 @@
 [![PyPI version](https://badge.fury.io/py/devinterp.svg)](https://badge.fury.io/py/devinterp) ![Python version](https://img.shields.io/pypi/pyversions/devinterp) ![Contributors](https://img.shields.io/github/contributors/timaeus-research/devinterp)
 
 
+## My Edits
+
+As part of MATS application I changed a few engineering things (Metropolis mini-batch step, layer-wise RLCT). These changes are available in the branch `cindy-playground'.
 
 ## A Python Library for Developmental Interpretability Research
 
